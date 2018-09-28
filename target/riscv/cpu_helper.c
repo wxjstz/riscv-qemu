@@ -464,16 +464,23 @@ int riscv_cpu_handle_mmu_fault(CPUState *cs, vaddr address, int size,
     qemu_log_mask(CPU_LOG_MMU,
             "%s address=%" VADDR_PRIx " ret %d physical " TARGET_FMT_plx
              " prot %d\n", __func__, address, ret, pa, prot);
-    if (riscv_feature(env, RISCV_FEATURE_PMP) &&
-        !pmp_hart_has_privs(env, pa, TARGET_PAGE_SIZE, 1 << rw)) {
-        ret = TRANSLATE_FAIL;
-    }
-    if (ret == TRANSLATE_SUCCESS) {
-        tlb_set_page(cs, address & TARGET_PAGE_MASK, pa & TARGET_PAGE_MASK,
-                     prot, mmu_idx, TARGET_PAGE_SIZE);
-    } else if (ret == TRANSLATE_FAIL) {
-        raise_mmu_exception(env, address, rw);
-    }
+	if(ret == TRANSLATE_SUCCESS) {
+		if (riscv_feature(env, RISCV_FEATURE_PMP)) {
+			if (pmp_hart_has_privs(env, pa & TARGET_PAGE_MASK, TARGET_PAGE_SIZE, 1 << rw)) {
+				tlb_set_page(cs, address, pa, prot, mmu_idx, TARGET_PAGE_SIZE);
+			} else if (pmp_hart_has_privs(env, pa, size, 1 << rw)) {
+				tlb_set_page(cs, address, pa, prot, mmu_idx, size);
+			} else {
+				ret = TRANSLATE_FAIL;
+			}
+		} else {
+			tlb_set_page(cs, address, pa, prot, mmu_idx, TARGET_PAGE_SIZE);
+		}
+	}
+	if(ret == TRANSLATE_FAIL) {
+		raise_mmu_exception(env, address, rw);
+	}
+
 #else
     switch (rw) {
     case MMU_INST_FETCH:

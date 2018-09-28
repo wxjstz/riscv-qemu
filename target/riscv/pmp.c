@@ -236,11 +236,6 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
     target_ulong e = 0;
     pmp_priv_t allowed_privs = 0;
 
-    /* Short cut if no rules */
-    if (0 == pmp_get_num_rules(env)) {
-        return env->priv == PRV_M ? true : false;
-    }
-
     /* 1.10 draft priv spec states there is an implicit order
          from low to high */
     for (i = 0; i < MAX_RISCV_PMPS; i++) {
@@ -262,6 +257,7 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
             break;
         }
         
+        /* fully inside */
         if ((s + e) == 2) {
             allowed_privs = PMP_READ | PMP_WRITE | PMP_EXEC;
 
@@ -280,16 +276,8 @@ bool pmp_hart_has_privs(CPURISCVState *env, target_ulong addr,
     }
 
     /* No rule matched */
-    if (ret == -1) {
-        if (env->priv == PRV_M) {
-            ret = 1; /* Privileged spec v1.10 states if no PMP entry matches an
-                      * M-Mode access, the access succeeds */
-        } else {
-            ret = 0; /* Other modes are not allowed to succeed if they don't
-                      * match a rule, but there are rules.  We've checked for
-                      * no rule earlier in this function. */
-        }
-    }
+	if(ret == -1)
+		ret = (env->priv == PRV_M ? 1 : 0);
 
     return ret == 1 ? true : false;
 }
@@ -307,13 +295,13 @@ void pmpcfg_csr_write(CPURISCVState *env, uint32_t reg_index,
     PMP_DEBUG("hart " TARGET_FMT_ld ": reg%d, val: 0x" TARGET_FMT_lx,
         env->mhartid, reg_index, val);
 
-    if ((reg_index & 1) && (sizeof(target_ulong) == 8)) {
-        PMP_DEBUG("ignoring write - incorrect address");
-        return;
-    }
-
-    if(sizeof(target_ulong) == 8)
-        reg_index /= 2;
+	if(sizeof(target_ulong) == 8) {
+		if(reg_index & 1)  {
+			PMP_DEBUG("ignoring write - incorrect address");
+			return;
+		}
+		reg_index >>= 1;
+	}
 
     for (i = 0; i < sizeof(target_ulong); i++) {
         cfg_val = (val >> 8 * i)  & 0xff;
@@ -332,12 +320,17 @@ target_ulong pmpcfg_csr_read(CPURISCVState *env, uint32_t reg_index)
     target_ulong cfg_val = 0;
     uint8_t val = 0;
 
-    if(sizeof(target_ulong) == 8)
-        reg_index /= 2;
+	if(sizeof(target_ulong) == 8) {
+		if(reg_index & 1)  {
+			PMP_DEBUG("ignoring read - incorrect address");
+			return 0;
+		}
+		reg_index >>= 1;
+	}
 
     for (i = 0; i < sizeof(target_ulong); i++) {
         val = pmp_read_cfg(env, (reg_index * sizeof(target_ulong)) + i);
-        cfg_val |= (val << (i * 8));
+        cfg_val |= ((target_ulong)val << (i * 8));
     }
 
     PMP_DEBUG("hart " TARGET_FMT_ld ": reg%d, val: 0x" TARGET_FMT_lx,
